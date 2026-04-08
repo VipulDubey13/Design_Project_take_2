@@ -3,12 +3,12 @@ import time
 from profiling.execution_profiler import ExecutionProfiler
 from profiling.time_model import TimeModel
 
-
 class CFGExecutionEngine:
     """
     The 'Heart' of the simulator.
     Steps through Basic Blocks and individual lines to simulate
     real-world hardware execution and checkpointing.
+    Now enhanced for Triple-Pass Comparison (Periodic vs Young's vs ML).
     """
 
     def __init__(self, blocks, context):
@@ -43,7 +43,7 @@ class CFGExecutionEngine:
         if num_successors == 1:
             return block.successors[0]
 
-        # Dynamic weighting for branching
+        # Dynamic weighting for branching (preserved from original)
         primary_weight = 0.7
         others_weight = 0.3 / (num_successors - 1)
         weights = [primary_weight] + [others_weight] * (num_successors - 1)
@@ -66,25 +66,28 @@ class CFGExecutionEngine:
         )
 
     # --------------------------------------------------
-    # EXECUTION LOOP (The ML-Integrated Version)
+    # EXECUTION LOOP (Triple-Pass Aware)
     # --------------------------------------------------
 
     def execute(self, max_steps=10000):
         """
         The main loop that steps through the program structure.
+        Supports Periodic, Analytical (Young's), and ML Adaptive strategies.
         """
+        # Determine verbosity: Only ML strategy shows line-level logs
+        # This keeps the comparison table clean as per your request.
+        verbose = (self.context.strategy == "ml_adaptive")
         steps = 0
 
         while steps < max_steps:
             block = self.blocks[self.current_block_id]
             self.visited_counts[self.current_block_id] += 1
 
-            # --- 1. PROFILING THE BLOCK (Point #1) ---
+            # --- 1. PROFILING THE BLOCK ---
             # Measure actual CPU time elapsed for this block
             start_time = time.perf_counter()
 
-            # Simulated hardware latency (Point #3: Avg time per line)
-            # Increase this value to see more checkpoints in the log
+            # Simulated hardware latency (Preserved: 0.005s per block)
             time.sleep(0.005)
 
             end_time = time.perf_counter()
@@ -98,26 +101,24 @@ class CFGExecutionEngine:
                 lines=block.lines
             )
 
-            # --- 3. LINE-BY-LINE EXECUTION (The ML Core) ---
-            # --- 3. LINE-BY-LINE EXECUTION (Point #6 Enhanced) ---
+            # --- 3. LINE-BY-LINE EXECUTION ---
             for line_num, line_code in block.lines:
-                # OPTIONAL: Uncomment the line below to see a live trace of lines
-                # print(f"  [Executing] Line {line_num}: {line_code.strip()}")
-
-                # Get instruction cost from the model
+                # Get instruction cost from the time model
                 line_cost = self.time_model.get_line_cost(line_num)
 
-                # Commit work
+                # IMPORTANT: Commit work to context.
+                # This allows the simulator to trigger random failures based on λ.
                 self.context.add_work(line_cost)
 
-                # Evaluate Checkpoint
+                # Evaluate Checkpoint decision based on current strategy (ML, Periodic, or Young's)
                 dynamic_state_size = self.compute_dynamic_state_size(self.current_block_id)
 
-                # We pass the line_num and the line_code to the log
+                # Evaluate decision (The context handles the different strategy math)
                 self.context.evaluate_checkpoint(
-                    event_type=f"Line {line_num}: {line_code.strip()}", # Detailed description
+                    event_type=f"Line {line_num}: {line_code.strip()}",
                     state_size=dynamic_state_size,
-                    current_line_cost=line_cost
+                    current_line_cost=line_cost,
+                    verbose=verbose # Only prints if it's the ML run
                 )
 
             # --- 4. TRANSITION TO NEXT BLOCK ---
@@ -126,7 +127,7 @@ class CFGExecutionEngine:
             if next_block_id is None:
                 break
 
-            # Heuristic for stack depth tracking
+            # Heuristic for stack depth tracking (Preserved)
             last_line = block.lines[-1][1].strip()
             if "return" in last_line and self.simulated_stack_depth > 0:
                 self.simulated_stack_depth -= 1
@@ -136,6 +137,8 @@ class CFGExecutionEngine:
             self.current_block_id = next_block_id
             steps += 1
 
-        final_time = self.time_model.get_total_execution_estimate()
-        print(f"\n[Engine] Simulation Complete.")
-        print(f"[Engine] Total Hardware Execution Time (Estimated): {final_time:.6f}s")
+        # Final Summary (Only for the ML run to avoid clutter)
+        if verbose:
+            final_time = self.time_model.get_total_execution_estimate()
+            print(f"\n[Engine] {self.context.strategy.upper()} Pass Complete.")
+            print(f"[Engine] Estimated Hardware Time: {final_time:.6f}s")

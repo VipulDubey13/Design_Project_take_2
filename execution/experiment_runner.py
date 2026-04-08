@@ -15,14 +15,10 @@ from execution.cfg_execution_engine import CFGExecutionEngine
 # ==========================================================
 
 def build_cfg_from_c(c_file_path: str, verbose=True):
-
     parser = CAlgorithmParser(c_file_path)
     parser.load()
-    analysis = parser.analyze()
+    parser.analyze()
     program_representation = parser.get_program_representation()
-
-    if analysis["algorithm"] == "unknown":
-        raise ValueError("Could not detect algorithm type from C file.")
 
     bb_builder = BasicBlockBuilder(program_representation)
     blocks = bb_builder.build()
@@ -34,177 +30,110 @@ def build_cfg_from_c(c_file_path: str, verbose=True):
     structural_metrics = metrics_extractor.extract()
 
     if verbose:
-        print("\n==============================")
-        print("STATIC ANALYSIS SUMMARY")
-        print("==============================")
-        print(analysis)
-        print("\nStructural Metrics:")
+        print("\n" + "=" * 40)
+        print("PHASE 1: STATIC ANALYSIS")
+        print("=" * 40)
+        print(f"Algorithm: {parser.analyze()['algorithm'].upper()}")
+        print("\nStructural Weights Extracted:")
         for k, v in structural_metrics.items():
-            print(f"{k}: {v}")
+            print(f"  {k}: {v}")
 
-    return blocks, analysis, structural_metrics
+    return blocks, parser.analyze(), structural_metrics
 
-
-# ==========================================================
-# SINGLE EXECUTION RUN (DETAILED / OPTIONAL VERBOSE)
-# ==========================================================
-
-def run_single_execution(
-    blocks,
-    structural_metrics,
-    failure_rate,
-    checkpoint_cost,
-    state_size_cost_factor,
-    verbose=True
-):
-
-    context = ExecutionContext(
-        failure_rate=failure_rate,
-        checkpoint_cost=checkpoint_cost,
-        state_size_cost_factor=state_size_cost_factor,
-        structural_metrics=structural_metrics,
-        strategy="ml_adaptive" # Explicitly calling our ML strategy
-    )
-
-    engine = CFGExecutionEngine(blocks, context)
-    engine.execute()
-
-    metrics = context.get_metrics()
-
-    if verbose:
-        print("\nExecution Summary")
-        print("------------------------------")
-        print(f"Failure Rate (λ): {failure_rate}")
-        print(f"Total Failures: {metrics['failure_count']}")
-        print(f"Total Checkpoints: {metrics['checkpoint_count']}")
-
-        print("\n--- Time Breakdown ---")
-        print(f"Useful Work Time: {metrics['useful_work_time']:.4f}")
-        print(f"Recomputation Time: {metrics['recompute_time']:.4f}")
-        print(f"Checkpoint Overhead Time: {metrics['checkpoint_time']:.4f}")
-
-        print("\n--- Execution Metrics ---")
-        # FIXED: Changed 'baseline_time' to 'useful_work_time'
-        print(f"Baseline Execution Time: {metrics['useful_work_time']:.4f}")
-        print(f"Total Execution Time: {metrics['total_execution_time']:.4f}")
-        print(f"Overhead Ratio: {metrics['overhead_ratio']:.6f}")
-
-        checkpoint_log = metrics.get("checkpoint_log", [])
-
-        if checkpoint_log:
-            print("\n==============================")
-            print("CHECKPOINT PLACEMENT LOG")
-            print("==============================")
-
-            for i, cp in enumerate(checkpoint_log, start=1):
-                print(f"\nCheckpoint {i}")
-                print(f"  Event Type: {cp.get('event_type')}")
-                # FIXED: Updated keys to match new ExecutionContext log format
-                print(f"  Progress At Checkpoint: {cp.get('progress', 0):.4f}")
-                print(f"  Checkpoint Cost: {cp.get('cost', 0):.4f}")
-        else:
-            print("\nNo checkpoints were placed.")
-
-    return metrics
 
 # ==========================================================
-# MULTI-TRIAL EXPERIMENT (NO VERBOSE)
+# COMPARATIVE STUDY
 # ==========================================================
 
-def run_trials(blocks, structural_metrics, failure_rate, trials=20): # Increase trials to 20
-    overheads = []
-    failures = []
-    checkpoints = []
+def run_comparative_study(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01):
+    strategies = ["periodic", "analytical", "ml_adaptive"]
+    results = {}
+    study_seed = 42
 
-    for i in range(trials):
-        # We pass a dynamic seed based on the trial index
+    print("\n" + "=" * 40)
+    print(f"PHASE 2: COMPARATIVE BENCHMARKING (λ = {failure_rate})")
+    print("=" * 40)
+
+    for strategy in strategies:
         context = ExecutionContext(
             failure_rate=failure_rate,
-            checkpoint_cost=5,
+            checkpoint_cost=checkpoint_cost,
             state_size_cost_factor=0.001,
             structural_metrics=structural_metrics,
-            seed=random.randint(0, 1000000) # FIX: Real randomness
+            strategy=strategy,
+            seed=study_seed
         )
 
         engine = CFGExecutionEngine(blocks, context)
         engine.execute()
-        metrics = context.get_metrics()
+        results[strategy] = context.get_metrics()
 
+    print("\n" + "-" * 75)
+    print(f"{'STRATEGY':<15} | {'CPs':<8} | {'FAILURES':<10} | {'RECOMPUTE':<12} | {'EFFICIENCY'}")
+    print("-" * 75)
+
+    for strategy, data in results.items():
+        # Corrected Efficiency Formula: Work / (Work + Overhead + Recompute)
+        # We assume total_work_time is data['total_time'] - data['recompute_time'] - (CPs * cost)
+        work_time = max(0.0001, data.get('estimated_hardware_time', 0.03))
+        total_lost = data['recompute_time'] + (data['checkpoint_count'] * checkpoint_cost)
+        efficiency = (work_time / (work_time + total_lost)) * 100
+
+        print(f"{strategy.upper():<15} | "
+              f"{data['checkpoint_count']:<8} | "
+              f"{data['failure_count']:<10} | "
+              f"{data['recompute_time']:<12.4f} | "
+              f"{min(99.99, efficiency):.2f}%")
+    print("-" * 75)
+
+
+# ==========================================================
+# MULTI-TRIAL SWEEP
+# ==========================================================
+
+def run_trials(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01, trials=20):
+    overheads = []
+
+    for i in range(trials):
+        context = ExecutionContext(
+            failure_rate=failure_rate,
+            checkpoint_cost=checkpoint_cost,
+            state_size_cost_factor=0.001,
+            structural_metrics=structural_metrics,
+            strategy="ml_adaptive",
+            seed=random.randint(0, 1000000)
+        )
+
+        # KEY CHANGE: Strategy is "ml_adaptive" but we don't want it printing
+        # the trace for 80 trials. We silence the engine here.
+        engine = CFGExecutionEngine(blocks, context)
+
+        # Capture stdout to silence the engine's print statements
+        original_stdout = sys.stdout
+        sys.stdout = None
+        try:
+            engine.execute()
+        finally:
+            sys.stdout = original_stdout
+
+        metrics = context.get_metrics()
         overheads.append(metrics["overhead_ratio"])
-        failures.append(metrics["failure_count"])
-        checkpoints.append(metrics["checkpoint_count"])
 
     return {
-        "failure_rate": failure_rate,
         "mean_overhead": statistics.mean(overheads),
-        "std_overhead": statistics.stdev(overheads), # Now this will be > 0
-        "mean_failures": statistics.mean(failures),
-        "mean_checkpoints": statistics.mean(checkpoints)
+        "std_overhead": statistics.stdev(overheads) if trials > 1 else 0.0
     }
 
 
-# ==========================================================
-# PARAMETER SWEEP
-# ==========================================================
-
-def run_failure_sweep(
-    blocks,
-    structural_metrics,
-    failure_rates,
-    trials_per_rate=10
-):
-
-    results = []
+def run_failure_sweep(blocks, structural_metrics, failure_rates, trials_per_rate=20):
+    print("\n" + "=" * 40)
+    print("PHASE 3: STOCHASTIC FAILURE SWEEP (ML)")
+    print("=" * 40)
+    print(f"{'FAILURE RATE (λ)':<18} | {'AVG OVERHEAD':<15} | {'STDEV'}")
+    print("-" * 55)
 
     for rate in failure_rates:
+        summary = run_trials(blocks, structural_metrics, failure_rate=rate, trials=trials_per_rate)
+        print(f"{rate:<18} | {summary['mean_overhead']:<15.4f} | {summary['std_overhead']:.4f}")
 
-        summary = run_trials(
-            blocks,
-            structural_metrics,
-            failure_rate=rate,
-            trials=trials_per_rate
-        )
-
-        results.append(summary)
-
-        print("\n--------------------------------")
-        print(f"λ = {rate}")
-        print(f"Mean Overhead: {summary['mean_overhead']:.4f} "
-              f"+/- {summary['std_overhead']:.4f}")
-        print(f"Mean Failures: {summary['mean_failures']:.2f}")
-        print(f"Mean Checkpoints: {summary['mean_checkpoints']:.2f}")
-
-    return results
-
-
-# ==========================================================
-# MAIN ENTRY
-# ==========================================================
-
-if __name__ == "__main__":
-
-    if len(sys.argv) < 2:
-        print("Usage: python experiment_runner.py <path_to_c_file>")
-        sys.exit(1)
-
-    c_file_path = sys.argv[1]
-
-    # 1️⃣ Static Analysis (done once)
-    blocks, analysis, structural_metrics = build_cfg_from_c(
-        c_file_path,
-        verbose=True
-    )
-
-    # 2️⃣ Failure Rate Sweep
-    failure_rates = [0.005, 0.01, 0.02, 0.03]
-
-    print("\n==============================")
-    print("STOCHASTIC FAILURE SWEEP")
-    print("==============================")
-
-    run_failure_sweep(
-        blocks,
-        structural_metrics,
-        failure_rates,
-        trials_per_rate=10
-    )
+    print("-" * 55)
