@@ -38,15 +38,16 @@ def build_cfg_from_c(c_file_path: str, verbose=True):
         for k, v in structural_metrics.items():
             print(f"  {k}: {v}")
 
-    return blocks, parser.analyze(), structural_metrics
+    # Ensure all four items are returned
+    return blocks, structural_metrics, structural_metrics, parser
 
 
 # ==========================================================
 # COMPARATIVE STUDY
 # ==========================================================
 
-def run_comparative_study(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01):
-    strategies = ["periodic", "analytical", "ml_adaptive"]
+def run_comparative_study(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01, parser=None):
+    strategies = ["periodic", "analytical", "ml_adaptive", "regression", "classification"]
     results = {}
     study_seed = 42
 
@@ -64,6 +65,7 @@ def run_comparative_study(blocks, structural_metrics, failure_rate, checkpoint_c
             seed=study_seed
         )
 
+        context.parser = parser
         engine = CFGExecutionEngine(blocks, context)
         engine.execute()
         results[strategy] = context.get_metrics()
@@ -91,7 +93,7 @@ def run_comparative_study(blocks, structural_metrics, failure_rate, checkpoint_c
 # MULTI-TRIAL SWEEP
 # ==========================================================
 
-def run_trials(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01, trials=20):
+def run_trials(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01, trials=20, parser=None):
     overheads = []
 
     for i in range(trials):
@@ -104,6 +106,7 @@ def run_trials(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01, t
             seed=random.randint(0, 1000000)
         )
 
+        context.parser = parser
         # KEY CHANGE: Strategy is "ml_adaptive" but we don't want it printing
         # the trace for 80 trials. We silence the engine here.
         engine = CFGExecutionEngine(blocks, context)
@@ -125,7 +128,7 @@ def run_trials(blocks, structural_metrics, failure_rate, checkpoint_cost=0.01, t
     }
 
 
-def run_failure_sweep(blocks, structural_metrics, failure_rates, trials_per_rate=20):
+def run_failure_sweep(blocks, structural_metrics, failure_rates, trials_per_rate=20, parser=None ):
     print("\n" + "=" * 40)
     print("PHASE 3: STOCHASTIC FAILURE SWEEP (ML)")
     print("=" * 40)
@@ -133,7 +136,7 @@ def run_failure_sweep(blocks, structural_metrics, failure_rates, trials_per_rate
     print("-" * 55)
 
     for rate in failure_rates:
-        summary = run_trials(blocks, structural_metrics, failure_rate=rate, trials=trials_per_rate)
+        summary = run_trials(blocks, structural_metrics, failure_rate=rate, trials=trials_per_rate, parser=parser)
         print(f"{rate:<18} | {summary['mean_overhead']:<15.4f} | {summary['std_overhead']:.4f}")
 
     print("-" * 55)

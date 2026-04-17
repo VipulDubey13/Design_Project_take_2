@@ -8,7 +8,7 @@ from execution.cfg_execution_engine import CFGExecutionEngine
 
 def generate_ml_dataset(c_file, output_file="ml_training_data.csv", samples=10000):
     # 1. Get the static structure once
-    blocks, _, structural_metrics = build_cfg_from_c(c_file, verbose=False)
+    blocks, _, structural_metrics, parser = build_cfg_from_c(c_file, verbose=False)
 
     fieldnames = [
         'failure_rate', 'checkpoint_cost', 'loop_count',
@@ -37,6 +37,7 @@ def generate_ml_dataset(c_file, output_file="ml_training_data.csv", samples=1000
                 seed=random.randint(0, 10 ** 6)
             )
 
+            context.parser = parser
             engine = CFGExecutionEngine(blocks, context)
 
             # Silent execution (no printing)

@@ -5,6 +5,12 @@ try:
     from ml.decision_engine import DecisionEngine
 except ImportError:
     DecisionEngine = None
+try:
+    from ml.regression_model import FailureRegressionModel
+    from ml.classification_model import FailureClassificationModel
+except ImportError:
+    FailureRegressionModel = None
+    FailureClassificationModel = None\
 
 
 class CheckpointPolicy:
@@ -77,6 +83,19 @@ class CheckpointPolicy:
             # Static time-based threshold (e.g., save every 0.05 seconds)
             periodic_threshold = 0.05
             return work_since_last >= periodic_threshold
+        # ------------------------------------------------------
+        # 4. Regression Strategy (Predictive)
+        # ------------------------------------------------------
+        if self.strategy == "regression" and FailureRegressionModel:
+            model = FailureRegressionModel()
+            return model.should_checkpoint(work_since_last, failure_rate, current_line_cost)
+
+        # ------------------------------------------------------
+        # 5. Classification Strategy (State-Based)
+        # ------------------------------------------------------
+        if self.strategy == "classification" and FailureClassificationModel:
+            model = FailureClassificationModel()
+            return model.should_checkpoint(work_since_last, failure_rate)
 
         return False
 

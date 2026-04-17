@@ -103,6 +103,10 @@ class CFGExecutionEngine:
 
             # --- 3. LINE-BY-LINE EXECUTION ---
             for line_num, line_code in block.lines:
+                # Track Memory Reads and Writes for this line
+                reads, writes = self.context.parser.get_memory_ops(line_code)
+                self.context.add_memory_ops(reads, writes)
+                
                 # Get instruction cost from the time model
                 line_cost = self.time_model.get_line_cost(line_num)
 

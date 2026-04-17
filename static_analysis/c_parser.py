@@ -163,6 +163,30 @@ class CAlgorithmParser:
                 return True
 
         return False
+    def get_memory_ops(self, line: str):
+        """
+        Analyzes a single line of C code for memory operations.
+        Rule: a = b is 1 write (a) and 1 read (b).
+        """
+        # Detect Writes: Matches variables followed by assignment (=, +=, etc) or increments (++, --)
+        write_patterns = [r'\b\w+\b\s*(?==|\+=|-=|\*=|/=|%=)', r'\b\w+\b(?=\+\+|--)']
+        writes = 0
+        for pattern in write_patterns:
+            writes += len(re.findall(pattern, line))
+
+        # Detect Potential Reads: Look for all words/variables
+        all_tokens = re.findall(r'\b[a-zA-Z_]\w*\b', line)
+        
+        # Keywords to ignore (they aren't memory reads)
+        keywords = {'if', 'while', 'for', 'return', 'int', 'void', 'float', 'double', 'char', 'long', 'static', 'unsigned', 'else', 'switch', 'case', 'break'}
+        
+        # Filter tokens: If it's not a keyword and not a write, we count it as a read
+        clean_tokens = [t for t in all_tokens if t not in keywords]
+        
+        # Reads is the remaining tokens minus the writes we already counted
+        reads = max(0, len(clean_tokens) - writes)
+        
+        return reads, writes
 
     # ==========================================================
     # PROGRAM REPRESENTATION FOR CFG / BLOCK BUILDER

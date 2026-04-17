@@ -22,6 +22,8 @@ class ExecutionMetrics:
     checkpoint_time: float = 0.0
     checkpoint_count: int = 0
     failure_count: int = 0
+    total_reads: int = 0   # NEW
+    total_writes: int = 0  # NEW
 
 
 class ExecutionContext:
@@ -47,6 +49,7 @@ class ExecutionContext:
         self.base_checkpoint_cost = checkpoint_cost
         self.state_size_cost_factor = state_size_cost_factor
         self.strategy = strategy
+        self.parser = None # Add this line to link back to the parser
         self.structural_metrics = structural_metrics or {}  # Store for ML logic
         self.metrics = ExecutionMetrics()
 
@@ -185,6 +188,10 @@ class ExecutionContext:
 
         self.last_checkpoint_progress = self.current_progress
 
+    def add_memory_ops(self, reads: int, writes: int):
+        self.metrics.total_reads += reads
+        self.metrics.total_writes += writes
+
     def get_metrics(self) -> Dict:
         """Final Metrics Report."""
         total_time = (
@@ -202,6 +209,7 @@ class ExecutionContext:
             "overhead_ratio": round((total_time - baseline) / baseline, 6) if baseline > 0 else 0,
             "checkpoint_count": self.metrics.checkpoint_count,
             "failure_count": self.metrics.failure_count,
-            "checkpoint_log": self.checkpoint_log,
-            "strategy": self.strategy
+            "total_reads": self.metrics.total_reads,     # Ensure comma here
+            "total_writes": self.metrics.total_writes,   # Ensure comma here
+            "strategy": self.strategy                   # Last one doesn't need a comma
         }
